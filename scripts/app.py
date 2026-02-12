@@ -1,81 +1,98 @@
 import streamlit as st
 import torch
 import torch.nn as nn
-from torchvision import models, transforms
+from torchvision import transforms, models
 from PIL import Image
+import numpy as np
 import os
 
 # ---------------- CONFIG ----------------
 MODEL_PATH = "model/hand_sign_model.pth"
-DATA_DIR = "data/train"   # change if needed
-DEVICE = "cpu"
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+NUM_CLASSES = 18
 
-# ---------------- LOAD CLASS NAMES ----------------
-if os.path.exists(DATA_DIR):
-    CLASS_NAMES = sorted(os.listdir(DATA_DIR))
-else:
-    # fallback manual class names
-    CLASS_NAMES = ["A","B","C","D","E","F","G","H","I","J",
-                   "K","L","M","N","O","P","Q","R"]
+# 🔥 IMPORTANT — manually define your class names here
+CLASS_NAMES = [
+    "Like",
+    "Fist",
+    "One",
+    "Two",
+    "Three",
+    "Four",
+    "Five",
+    "Six",
+    "Seven",
+    "Eight",
+    "Nine",
+    "Ten",
+    "Stop",
+    "Rock",
+    "Call",
+    "Peace",
+    "Okay",
+    "ThumbsDown"
+]
 
-# ---------------- LOAD MODEL ----------------
+# ------------- TRANSFORM ----------------
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor()
+])
+
+# ------------- LOAD MODEL ---------------
 @st.cache_resource
 def load_model():
     model = models.mobilenet_v2(weights=None)
-    model.classifier[1] = nn.Linear(model.last_channel, len(CLASS_NAMES))
+    model.classifier[1] = nn.Linear(model.last_channel, NUM_CLASSES)
     model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
+    model.to(DEVICE)
     model.eval()
     return model
 
 model = load_model()
 
-# ---------------- TRANSFORM ----------------
-transform = transforms.Compose([
-    transforms.Resize((224,224)),
-    transforms.ToTensor()
-])
-
-# ---------------- PREDICT FUNCTION ----------------
-def predict_image(image):
-    image = transform(image).unsqueeze(0)
-    with torch.no_grad():
-        outputs = model(image)
-        probs = torch.nn.functional.softmax(outputs[0], dim=0)
-        confidence, pred_class = torch.max(probs, 0)
-    return CLASS_NAMES[pred_class], float(confidence)*100
-
-
-# ---------------- UI ----------------
+# ------------- UI -----------------------
 st.set_page_config(page_title="AI Hand Sign Recognition", layout="centered")
-
 st.title("🤖 AI Hand Sign Recognition")
-st.write("Upload an image or use webcam to detect hand sign")
+st.write("Upload image or use webcam to detect hand sign")
 
 option = st.radio("Choose Input Method", ["Upload Image", "Use Webcam"])
 
-image = None
+def predict_image(image):
+    image = transform(image).unsqueeze(0).to(DEVICE)
 
-# ---------- Upload ----------
+    with torch.no_grad():
+        outputs = model(image)
+        probabilities = torch.nn.functional.softmax(outputs, dim=1)
+        confidence, predicted = torch.max(probabilities, 1)
+
+    predicted_label = CLASS_NAMES[predicted.item()]
+    confidence_score = confidence.item() * 100
+
+    return predicted_label, confidence_score
+
+# -------- Upload Image --------
 if option == "Upload Image":
-    uploaded_file = st.file_uploader("Upload Image", type=["jpg","jpeg","png"])
-    if uploaded_file:
+    uploaded_file = st.file_uploader("Upload Image", type=["jpg", "png", "jpeg"])
+
+    if uploaded_file is not None:
         image = Image.open(uploaded_file).convert("RGB")
+        st.image(image, caption="Selected Image", use_column_width=True)
 
-# ---------- Webcam ----------
-if option == "Use Webcam":
-    camera_image = st.camera_input("Take a photo")
-    if camera_image:
+        label, conf = predict_image(image)
+
+        st.success(f"✅ Prediction: {label}")
+        st.info(f"📊 Confidence: {conf:.2f}%")
+
+# -------- Webcam --------
+elif option == "Use Webcam":
+    camera_image = st.camera_input("Take a picture")
+
+    if camera_image is not None:
         image = Image.open(camera_image).convert("RGB")
+        st.image(image, caption="Captured Image", use_column_width=True)
 
-# ---------- Prediction ----------
-if image:
-    st.image(image, caption="Selected Image", use_container_width=True)
+        label, conf = predict_image(image)
 
-    label, confidence = predict_image(image)
-
-    st.success(f"✅ Prediction: {label}")
-    st.info(f"📊 Confidence: {confidence:.2f}%")
-
-    if confidence < 50:
-        st.warning("⚠ Low confidence — Try clearer hand sign")
-
+        st.success(f"✅ Prediction: {label}")
+        st.info(f"📊 Confidence: {conf:.2f}%")
