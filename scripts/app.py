@@ -3,35 +3,11 @@ import torch
 import torch.nn as nn
 from torchvision import transforms, models
 from PIL import Image
-import numpy as np
 import os
 
 # ---------------- CONFIG ----------------
 MODEL_PATH = "model/hand_sign_model.pth"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-NUM_CLASSES = 18
-
-# 🔥 IMPORTANT — manually define your class names here
-CLASS_NAMES = [
-    "Like",
-    "Fist",
-    "One",
-    "Two",
-    "Three",
-    "Four",
-    "Five",
-    "Six",
-    "Seven",
-    "Eight",
-    "Nine",
-    "Ten",
-    "Stop",
-    "Rock",
-    "Call",
-    "Peace",
-    "Okay",
-    "ThumbsDown"
-]
 
 # ------------- TRANSFORM ----------------
 transform = transforms.Compose([
@@ -42,14 +18,46 @@ transform = transforms.Compose([
 # ------------- LOAD MODEL ---------------
 @st.cache_resource
 def load_model():
+    checkpoint = torch.load(MODEL_PATH, map_location=DEVICE)
+
+    # If model was saved with class mapping
+    if isinstance(checkpoint, dict) and "class_names" in checkpoint:
+        class_names = checkpoint["class_names"]
+        state_dict = checkpoint["model_state"]
+    else:
+        # Fallback (IMPORTANT: change order if needed)
+        class_names = [
+            "Like",
+            "Fist",
+            "One",
+            "Two",
+            "Three",
+            "Four",
+            "Five",
+            "Six",
+            "Seven",
+            "Eight",
+            "Nine",
+            "Ten",
+            "Stop",
+            "Rock",
+            "Call",
+            "Peace",
+            "Okay",
+            "ThumbsDown"
+        ]
+        state_dict = checkpoint
+
     model = models.mobilenet_v2(weights=None)
-    model.classifier[1] = nn.Linear(model.last_channel, NUM_CLASSES)
-    model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
+    model.classifier[1] = nn.Linear(model.last_channel, len(class_names))
+    model.load_state_dict(state_dict)
     model.to(DEVICE)
     model.eval()
-    return model
 
-model = load_model()
+    return model, class_names
+
+
+model, CLASS_NAMES = load_model()
 
 # ------------- UI -----------------------
 st.set_page_config(page_title="AI Hand Sign Recognition", layout="centered")
@@ -77,7 +85,7 @@ if option == "Upload Image":
 
     if uploaded_file is not None:
         image = Image.open(uploaded_file).convert("RGB")
-        st.image(image, caption="Selected Image", use_column_width=True)
+        st.image(image, caption="Selected Image", width=500)
 
         label, conf = predict_image(image)
 
@@ -90,7 +98,7 @@ elif option == "Use Webcam":
 
     if camera_image is not None:
         image = Image.open(camera_image).convert("RGB")
-        st.image(image, caption="Captured Image", use_column_width=True)
+        st.image(image, caption="Captured Image", width=500)
 
         label, conf = predict_image(image)
 
